@@ -202,6 +202,7 @@ public class SimpleDNS
 					long subnetBits = 0xffffffff - ((1 << (32 - subnetLength)) - 1);
 					if ((subnetBits & ipInt) == (subnetBits & subnet)) {
 						System.out.println("This IP is in EC2!");
+						// Found in EC2, add to records
 						String location = ec2Table.get(entry);
 						DNSRdataString txt = new DNSRdataString(location + "-" + ip);
 						DNSResourceRecord record = new DNSResourceRecord();
