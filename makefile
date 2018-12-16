@@ -5,10 +5,16 @@ JC = javac
         $(JC) $(JFLAGS) $src.edu.wisc.cs.sdn.simpledns.SimpleDNS.java
 
 CLASSES = \
-        Foo.java \
-        Blah.java \
-        Library.java \
-        Main.java
+        src.edu.wisc.cs.sdn.simpledns.SimpleDNS.java \
+        src.edu.wisc.cs.sdn.simpledns.packet.DNS.java \
+        src.edu.wisc.cs.sdn.simpledns.packet.DNSQuestion.java \
+        src.edu.wisc.cs.sdn.simpledns.packet.DNSRdata.java \
+        src.edu.wisc.cs.sdn.simpledns.packet.DNSRdataAddress.java \
+        src.edu.wisc.cs.sdn.simpledns.packet.DNSRdataBytes.java \
+        src.edu.wisc.cs.sdn.simpledns.packet.DNSRdataName.java \
+        src.edu.wisc.cs.sdn.simpledns.packet.DNSRdataString.java \
+        src.edu.wisc.cs.sdn.simpledns.packet.DNSResourceRecord.java
+
 
 default: classes
 
