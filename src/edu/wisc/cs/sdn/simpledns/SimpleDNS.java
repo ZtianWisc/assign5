@@ -114,7 +114,7 @@ public class SimpleDNS
 				sendDNSReply(dnsPacket, dnsReceived);
 				done = true;
 			} else {
-				//TODO: This part has problem, when NS replies an SOA, serverAddress doesnot update, thus goes to infinite looping
+				//TODO: This part has problem
 				if (rootAnswers.isEmpty()) {
 					// if original query was NS, then done.
 					if (question.getType() == DNS.TYPE_NS) {
