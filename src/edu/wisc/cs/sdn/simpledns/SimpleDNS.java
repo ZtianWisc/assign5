@@ -179,7 +179,7 @@ public class SimpleDNS
 	private static void sendDNSReply(DNS dnsPacket, DatagramPacket dnsReceived) throws IOException{
 		if(dnsPacket.getQuestions().get(0).getType() == DNS.TYPE_A){
 			System.out.println("********** Checking if in EC2 regions ************");
-			checkIfInEC2(dnsPacket);
+			addEC2ToAns(dnsPacket);
 			System.out.println("************** Checking done *********************");
 		}
 		DatagramPacket ans = new DatagramPacket(dnsPacket.serialize(), 0, dnsPacket.getLength(), dnsReceived.getSocketAddress());
@@ -219,7 +219,7 @@ public class SimpleDNS
 		return ec2Map;
 	}
 
-	private static void checkIfInEC2(DNS dnsPacket){
+	private static void addEC2ToAns(DNS dnsPacket){
 		if(dnsPacket.getAdditional().size() > 0){
 			for (int i = 0; i < dnsPacket.getAnswers().size(); i++) {
 				if (dnsPacket.getAnswers().get(i).getType() != DNS.TYPE_A){
@@ -229,6 +229,7 @@ public class SimpleDNS
 				DNSRdataAddress addressData = (DNSRdataAddress) dnsPacket.getAnswers().get(i).getData();
 				String addressString = addressData.getAddress().toString();
 				String ipStr = addressString.substring(addressString.indexOf("/") + 1); // e.g. 73.252.22.1
+				System.out.println("Checking if address " + ipStr + " is in EC2");
 				for (String entry : ec2Table.keySet()) {
 					long ip = parseIp(ipStr);
 					long subnet = parseIp(entry.substring(0, entry.indexOf("/")));
