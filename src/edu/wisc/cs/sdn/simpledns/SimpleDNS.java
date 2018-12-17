@@ -82,6 +82,7 @@ public class SimpleDNS
 	}
 
 	private static void handleDnsQuery(DNS dnsPacket, DatagramPacket dnsReceived) throws IOException {
+
 		// Check NS then reply to client, if in EC2, add a TXT record to reply
 		byte[] buffer = new byte[MAX_PACKET_SIZE];
 		DatagramPacket query;
@@ -90,7 +91,8 @@ public class SimpleDNS
 		DatagramSocket socket = new DatagramSocket(QUERY_DNS_PORT);
 		DNS toSendToClient = dnsPacket;
 		boolean done = false;
-		while(!done){
+
+		while(!done) {
 			query = new DatagramPacket(dnsPacket.serialize(), 0, dnsPacket.getLength(), serverAddress, QUERY_DNS_PORT);
 			// This socket is used to send query to server
 			socket.send(query);
@@ -98,7 +100,7 @@ public class SimpleDNS
 			socket.setSoTimeout(1000);
 			try {
 				socket.receive(new DatagramPacket(buffer, buffer.length));
-			} catch (SocketTimeoutException s){
+			} catch (SocketTimeoutException s) {
 				System.out.println("Didn't receive answer from server " + serverAddress.toString());
 				done = true;
 			}
@@ -107,41 +109,53 @@ public class SimpleDNS
 			List<DNSResourceRecord> rootAnswers = dnsPacket.getAnswers();
 			List<DNSResourceRecord> rootAuthorities = dnsPacket.getAuthorities();
 			List<DNSResourceRecord> rootAdditional = dnsPacket.getAdditional();
-
 			if(!dnsPacket.isRecursionDesired()){
 				// Send back to client
 				sendDNSReply(dnsPacket, dnsReceived);
 				done = true;
 			} else {
-				//TODO: RecursionDesired.
-				for (DNSResourceRecord auth : rootAuthorities){
-					if(auth.getType() != DNS.TYPE_NS){
-						continue;
+				//TODO: This part has problem, when NS replies an SOA, serverAddress doesnot update, thus goes to infinite looping
+				if (rootAnswers.isEmpty()) {
+					// if original query was NS, then done.
+					if (question.getType() == DNS.TYPE_NS) {
+						toSendToClient.setQuestions(dnsPacket.getQuestions());
+						toSendToClient.setAnswers(dnsPacket.getAdditional());
+						sendDNSReply(dnsPacket, dnsReceived);
 					}
-					DNSRdataName nsName = (DNSRdataName) auth.getData();
-					for (DNSResourceRecord additional : rootAdditional){
-						if(additional.getType() == DNS.TYPE_A && nsName.getName().equals(additional.getName())){
-							DNSRdataAddress addressData = (DNSRdataAddress) additional.getData();
-							String addressName = addressData.toString();
-							serverAddress = InetAddress.getByName(addressName);
-							break;
+					for (DNSResourceRecord auth : rootAuthorities) {
+						boolean found = false;
+						if (auth.getType() != DNS.TYPE_NS) {
+							continue;
 						}
+						DNSRdataName nsName = (DNSRdataName) auth.getData();
+						for (DNSResourceRecord additional : rootAdditional) {
+							if (additional.getType() == DNS.TYPE_A && nsName.getName().equals(additional.getName())) {
+								DNSRdataAddress addressData = (DNSRdataAddress) additional.getData();
+								String addressName = addressData.toString();
+								serverAddress = InetAddress.getByName(addressName);
+								System.out.println("Query to another NS " + serverAddress.toString());
+								found = true;
+							}
+						}
+						if (found) break;
 					}
-				}
-				// Add additionals, authorities, and answers to reply
-				for (int i = 0; i < rootAdditional.size(); i++){
-					toSendToClient.addAdditional(rootAdditional.get(i));
-				}
-				for (int i = 0; i < rootAuthorities.size(); i++) {
-					toSendToClient.addAuthority((rootAuthorities.get(i)));
-				}
-				// Hold toSendToClient until get answers
-				if(!rootAnswers.isEmpty()){
-					for (DNSResourceRecord record : rootAnswers){
-						toSendToClient.addAnswer(record);
+					// Add additionals, authorities to reply
+					toSendToClient.setAdditional(rootAdditional);
+					toSendToClient.setAuthorities(rootAuthorities);
+
+				} else { // Hold toSendToClient until get answers
+					DNSResourceRecord rootAns = rootAnswers.get(0);
+					if (rootAns.getType() == DNS.TYPE_CNAME){
+						DNSQuestion nextQuestion = new DNSQuestion();
+						DNSRdataName dnsRdataname = (DNSRdataName) rootAns.getData();
+						nextQuestion.setName(dnsRdataname.getName());
+						nextQuestion.setType(question.getType());
+						dnsPacket.setQuestions(Collections.singletonList(nextQuestion));
+					} else {
+						toSendToClient.setAnswers(rootAnswers);
+						sendDNSReply(toSendToClient, dnsReceived);
+						done = true;
 					}
-					sendDNSReply(toSendToClient, dnsReceived);
-					done = true;
 				}
 			}
 			prepareNewQuery(dnsPacket);
