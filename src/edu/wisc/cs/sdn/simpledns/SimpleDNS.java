@@ -102,6 +102,7 @@ public class SimpleDNS
 				socket.receive(new DatagramPacket(buffer, buffer.length));
 			} catch (SocketTimeoutException s) {
 				System.out.println("Didn't receive answer from server " + serverAddress.toString());
+				System.out.println("-----------------Query failed--------------------");
 				done = true;
 			}
 			System.out.println("Received answer from server " + serverAddress.toString());
@@ -114,11 +115,10 @@ public class SimpleDNS
 				sendDNSReply(dnsPacket, dnsReceived);
 				done = true;
 			} else {
-				//TODO: This part has problem
+				//TODO: This part has problem. When querying www.code.org. It seems like the program keep queries for org.
 				if (rootAnswers.isEmpty()) {
 					// if original query was NS, then done.
 					if (question.getType() == DNS.TYPE_NS) {
-						toSendToClient.setQuestions(dnsPacket.getQuestions());
 						toSendToClient.setAnswers(dnsPacket.getAdditional());
 						sendDNSReply(dnsPacket, dnsReceived);
 					}
