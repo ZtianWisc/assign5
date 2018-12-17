@@ -15,9 +15,9 @@ public class SimpleDNS
 	private static String serverName;
 	private static Map<String, String> ec2Table;
 	private static DatagramSocket serverSocket;
-	private final static int RECEIVE_DNS_PORT = 8053;
-	private final static int SEND_DNS_PORT = 53;
-	private final static int MAX_PACKET_SIZE = 4096;
+	private final static int CLIENT_DNS_PORT = 8053;
+	private final static int QUERY_DNS_PORT = 53;
+	private final static int MAX_PACKET_SIZE = 1024;
 
 	public static void main(String[] args) {
 		System.out.println("Hello, DNS!");
@@ -36,9 +36,9 @@ public class SimpleDNS
 				System.out.println("Invalid Arguments!");
 				return;
 			}
-			// open a socket
-			startDnsServer();
 		}
+		// open a socket
+		startDnsServer();
 	}
 
 	private static void startDnsServer(){
@@ -48,11 +48,12 @@ public class SimpleDNS
 		DNSQuestion question;
 
 		try {
-			serverSocket = new DatagramSocket(RECEIVE_DNS_PORT);
-			System.out.println("Socket initialization succeeded, listening...");
+			serverSocket = new DatagramSocket(CLIENT_DNS_PORT);
+			System.out.println("Socket initialization succeeded, listening...(root server is " + serverName + ")");
 			while(true){
 				DatagramPacket dnsReceived = new DatagramPacket(buffer, buffer.length);
 				serverSocket.receive(dnsReceived);
+				System.out.println("Received client DNS query");
 				dnsPacket = DNS.deserialize(buffer, buffer.length);
 				if (dnsPacket.getOpcode() != DNS.OPCODE_STANDARD_QUERY){
 					// Only listening to standard queries
@@ -84,47 +85,66 @@ public class SimpleDNS
 		// Check NS then reply to client, if in EC2, add a TXT record to reply
 		byte[] buffer = new byte[MAX_PACKET_SIZE];
 		DatagramPacket query;
+		DNSQuestion question = dnsPacket.getQuestions().get(0);
 		InetAddress serverAddress = InetAddress.getByName(serverName);
-		DatagramSocket socket = new DatagramSocket(SEND_DNS_PORT);
+		DatagramSocket socket = new DatagramSocket(QUERY_DNS_PORT);
 		DNS toSendToClient = dnsPacket;
-
-		while(true){
-			query = new DatagramPacket(dnsPacket.serialize(), 0, dnsPacket.getLength(), serverAddress, SEND_DNS_PORT);
+		boolean done = false;
+		while(!done){
+			query = new DatagramPacket(dnsPacket.serialize(), 0, dnsPacket.getLength(), serverAddress, QUERY_DNS_PORT);
 			// This socket is used to send query to server
 			socket.send(query);
-			socket.receive(new DatagramPacket(buffer, buffer.length));
+			System.out.println("Sent query to server " + serverAddress.toString());
+			socket.setSoTimeout(1000);
+			try {
+				socket.receive(new DatagramPacket(buffer, buffer.length));
+			} catch (SocketTimeoutException s){
+				System.out.println("Didn't receive answer from server " + serverAddress.toString());
+				done = true;
+			}
+			System.out.println("Received answer from NS");
 			dnsPacket = DNS.deserialize(buffer, buffer.length);
+			List<DNSResourceRecord> rootAnswers = dnsPacket.getAnswers();
+			List<DNSResourceRecord> rootAuthorities = dnsPacket.getAuthorities();
+			List<DNSResourceRecord> rootAdditional = dnsPacket.getAdditional();
+
 			if(!dnsPacket.isRecursionDesired()){
 				// Send back to client
 				sendDNSReply(dnsPacket, dnsReceived);
-				break;
+				done = true;
 			} else {
-				dnsPacket.setQuery(true);
-				for (DNSResourceRecord additional : dnsPacket.getAdditional()){
-					if(additional.getType() == DNS.TYPE_AAAA || additional.getType() == DNS.TYPE_A){
-						DNSRdataAddress addressData = (DNSRdataAddress) additional.getData();
-						String addressName = addressData.toString();
-						serverAddress = InetAddress.getByName(addressName);
-						break;
+				//TODO: RecursionDesired.
+				for (DNSResourceRecord auth : rootAuthorities){
+					if(auth.getType() != DNS.TYPE_NS){
+						continue;
+					}
+					DNSRdataName nsName = (DNSRdataName) auth.getData();
+					for (DNSResourceRecord additional : rootAdditional){
+						if(additional.getType() == DNS.TYPE_A && nsName.getName().equals(additional.getName())){
+							DNSRdataAddress addressData = (DNSRdataAddress) additional.getData();
+							String addressName = addressData.toString();
+							serverAddress = InetAddress.getByName(addressName);
+							break;
+						}
 					}
 				}
-
 				// Add additionals, authorities, and answers to reply
-				for (int i = 0; i < dnsPacket.getAdditional().size(); i++){
-					toSendToClient.addAdditional(dnsPacket.getAdditional().get(i));
+				for (int i = 0; i < rootAdditional.size(); i++){
+					toSendToClient.addAdditional(rootAdditional.get(i));
 				}
-				for (int i = 0; i < dnsPacket.getAuthorities().size(); i++) {
-					toSendToClient.addAuthority((dnsPacket.getAuthorities().get(i)));
+				for (int i = 0; i < rootAuthorities.size(); i++) {
+					toSendToClient.addAuthority((rootAuthorities.get(i)));
 				}
-				if(dnsPacket.getAnswers().size() > 0){
-					for (DNSResourceRecord record : dnsPacket.getAnswers()){
+				// Hold toSendToClient until get answers
+				if(!rootAnswers.isEmpty()){
+					for (DNSResourceRecord record : rootAnswers){
 						toSendToClient.addAnswer(record);
 					}
 					sendDNSReply(toSendToClient, dnsReceived);
-					break;
+					done = true;
 				}
 			}
-			SimpleDNS.prepareNewQuery(dnsPacket);
+			prepareNewQuery(dnsPacket);
 		}
 		socket.close();
 	}
@@ -155,6 +175,7 @@ public class SimpleDNS
 
 	/** Map(ip/subnetLength -> geoLocation) */
 	private static Map<String, String> loadEC2Table(String file) {
+		System.out.println("Loading static EC2 table from " + file);
 		Map<String, String> ec2Map = new HashMap<String, String>();
 		BufferedReader br = null;
 		String line;
@@ -180,6 +201,7 @@ public class SimpleDNS
 				}
 			}
 		}
+		System.out.println("Loaded static EC2 table from " + file);
 		return ec2Map;
 	}
 
@@ -187,6 +209,7 @@ public class SimpleDNS
 		if(dnsPacket.getAdditional().size() > 0){
 			for (int i = 0; i < dnsPacket.getAnswers().size(); i++) {
 				if (dnsPacket.getAnswers().get(i).getType() != DNS.TYPE_A){
+					System.out.println("Not an IPv4 address");
 					continue;
 				}
 				DNSRdataAddress addressData = (DNSRdataAddress) dnsPacket.getAnswers().get(i).getData();
