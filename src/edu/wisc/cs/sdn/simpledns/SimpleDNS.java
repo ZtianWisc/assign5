@@ -102,7 +102,7 @@ public class SimpleDNS
 				System.out.println("Didn't receive answer from server " + serverAddress.toString());
 				done = true;
 			}
-			System.out.println("Received answer from NS");
+			System.out.println("Received answer from server " + serverAddress.toString());
 			dnsPacket = DNS.deserialize(buffer, buffer.length);
 			List<DNSResourceRecord> rootAnswers = dnsPacket.getAnswers();
 			List<DNSResourceRecord> rootAuthorities = dnsPacket.getAuthorities();
