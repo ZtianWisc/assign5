@@ -220,36 +220,34 @@ public class SimpleDNS
 	}
 
 	private static void addEC2ToAns(DNS dnsPacket){
-		if(dnsPacket.getAdditional().size() > 0){
-			for (int i = 0; i < dnsPacket.getAnswers().size(); i++) {
-				if (dnsPacket.getAnswers().get(i).getType() != DNS.TYPE_A){
-					System.out.println("Not an IPv4 address");
-					continue;
-				}
-				DNSRdataAddress addressData = (DNSRdataAddress) dnsPacket.getAnswers().get(i).getData();
-				String addressString = addressData.getAddress().toString();
-				String ipStr = addressString.substring(addressString.indexOf("/") + 1); // e.g. 73.252.22.1
-				System.out.println("Checking if address " + ipStr + " is in EC2");
-				for (String entry : ec2Table.keySet()) {
-					long ip = parseIp(ipStr);
-					long subnet = parseIp(entry.substring(0, entry.indexOf("/")));
-					int subnetLength = Integer.parseInt(entry.substring(entry.indexOf("/") + 1));
-					long subnetBits = 0xffffffff - ((1 << (32 - subnetLength)) - 1);
-					if ((subnetBits & ip) == (subnetBits & subnet)) {
-						System.out.println("This IP is in EC2!");
-						// Found in EC2, add to records
-						String location = ec2Table.get(entry);
-						DNSRdataString txt = new DNSRdataString(location + "-" + ip);
-						DNSResourceRecord record = new DNSResourceRecord();
-						record.setType(DNS.TYPE_TXT);
-						record.setName(addressData.toString());
-						record.setData(txt);
-						dnsPacket.addAnswer(record);
-					} else {
-						System.out.println("This IP is NOT in EC2!");
-					}
+		for (int i = 0; i < dnsPacket.getAnswers().size(); i++) {
+			if (dnsPacket.getAnswers().get(i).getType() != DNS.TYPE_A){
+				System.out.println("Not an IPv4 address");
+				continue;
+			}
+			DNSRdataAddress addressData = (DNSRdataAddress) dnsPacket.getAnswers().get(i).getData();
+			String addressString = addressData.getAddress().toString();
+			String ipStr = addressString.substring(addressString.indexOf("/") + 1); // e.g. 73.252.22.1
+			System.out.println("Checking if address " + ipStr + " is in EC2");
+			boolean found = false;
+			for (String entry : ec2Table.keySet()) {
+				long ip = parseIp(ipStr);
+				long subnet = parseIp(entry.substring(0, entry.indexOf("/")));
+				int subnetLength = Integer.parseInt(entry.substring(entry.indexOf("/") + 1));
+				long subnetBits = 0xffffffff - ((1 << (32 - subnetLength)) - 1);
+				if ((subnetBits & ip) == (subnetBits & subnet)) {
+					found = true;
+					String location = ec2Table.get(entry);
+					DNSRdataString txt = new DNSRdataString(location + "-" + ip);
+					DNSResourceRecord record = new DNSResourceRecord();
+					record.setType(DNS.TYPE_TXT);
+					record.setName(addressData.toString());
+					record.setData(txt);
+					dnsPacket.addAnswer(record);
 				}
 			}
+			if (found) System.out.println("This ip is found in EC2");
+			else System.out.println("This ip is NOT found in EC2");
 		}
 	}
 
