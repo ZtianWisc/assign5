@@ -103,7 +103,7 @@ public class SimpleDNS
 			} catch (SocketTimeoutException s) {
 				System.out.println("Didn't receive answer from server " + serverAddress.toString());
 				System.out.println("-----------------Query failed--------------------");
-				done = true;
+				break;
 			}
 			System.out.println("Received answer from server " + serverAddress.toString());
 			dnsPacket = DNS.deserialize(buffer, buffer.length);
