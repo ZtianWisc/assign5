@@ -18,6 +18,7 @@ public class SimpleDNS
 	private final static int CLIENT_DNS_PORT = 8053;
 	private final static int QUERY_DNS_PORT = 53;
 	private final static int MAX_PACKET_SIZE = 1024;
+	private final static int MAX_TIME_OUT = 500;
 
 	public static void main(String[] args) {
 		System.out.println("Hello, DNS!");
@@ -92,11 +93,12 @@ public class SimpleDNS
 		boolean done = false;
 
 		while(!done) {
+			boolean cNamed = false;
 			query = new DatagramPacket(dnsPacket.serialize(), 0, dnsPacket.getLength(), serverAddress, QUERY_DNS_PORT);
 			// This socket is used to send query to server
 			socket.send(query);
 			System.out.println("Sent query to server " + serverAddress.toString() + ". asking for " + question.toString());
-			socket.setSoTimeout(1000);
+			socket.setSoTimeout(MAX_TIME_OUT);
 			try {
 				socket.receive(new DatagramPacket(buffer, buffer.length));
 			} catch (SocketTimeoutException s) {
@@ -110,6 +112,14 @@ public class SimpleDNS
 			List<DNSResourceRecord> rootAnswers = dnsPacket.getAnswers();
 			List<DNSResourceRecord> rootAuthorities = dnsPacket.getAuthorities();
 			List<DNSResourceRecord> rootAdditional = dnsPacket.getAdditional();
+			/*
+			 for (DNSResourceRecord auth : rootAuthorities){
+				System.out.println(auth.toString());
+			}
+			for (DNSResourceRecord addl : rootAdditional){
+				System.out.println(addl.toString());
+			}
+			*/
 			if(!dnsPacket.isRecursionDesired()){
 				// Send back to client
 				sendDNSReply(dnsPacket, dnsReceived);
@@ -120,21 +130,25 @@ public class SimpleDNS
 					if (question.getType() == DNS.TYPE_NS) {
 						toSendToClient.setAnswers(dnsPacket.getAdditional());
 						sendDNSReply(dnsPacket, dnsReceived);
+						done = true;
 					}
 					// look for ip of authority in additional section
 					for (DNSResourceRecord auth : rootAuthorities) {
 						boolean serverUpdated = false;
+						System.out.println("-----Trying to find ip for " + auth.toString());
 						if (auth.getType() != DNS.TYPE_NS) {
 							continue;
 						}
 						DNSRdataName nsName = (DNSRdataName) auth.getData();
 						for (DNSResourceRecord additional : rootAdditional) {
-							if (additional.getType() == DNS.TYPE_A && nsName.getName().equals(additional.getName())) {
+							System.out.println("This addtional is " + additional.toString());
+							if (additional.getType() == DNS.TYPE_A
+									&& nsName.getName().equals(additional.getName()))
+							{
 								DNSRdataAddress addressData = (DNSRdataAddress) additional.getData();
 								String addressName = addressData.toString();
 								serverAddress = InetAddress.getByName(addressName);
-								System.out.println("#####updated Server to query " + serverAddress.toString());
-								//TODO: the problem now is that server to query is not updated when hearing back from root.
+								System.out.println("updated Server to query " + serverAddress.toString());
 								serverUpdated = true;
 								break;
 							}
@@ -146,13 +160,25 @@ public class SimpleDNS
 					toSendToClient.setAuthorities(rootAuthorities);
 
 				} else { // Hold toSendToClient until get answers
-					DNSResourceRecord rootAns = rootAnswers.get(0);
-					if (rootAns.getType() == DNS.TYPE_CNAME){
-						DNSQuestion nextQuestion = new DNSQuestion();
-						DNSRdataName dnsRdataname = (DNSRdataName) rootAns.getData();
-						nextQuestion.setName(dnsRdataname.getName());
-						nextQuestion.setType(question.getType());
-						dnsPacket.setQuestions(Collections.singletonList(nextQuestion));
+					System.out.println("Got Answers from server!");
+					boolean containTypeA = false;
+					for (DNSResourceRecord ans : rootAnswers){
+						if (ans.getType() == DNS.TYPE_A) {
+							containTypeA = true;
+							break;
+						}
+					}
+					if(!containTypeA){
+						for (DNSResourceRecord ans : rootAnswers){
+							if (ans.getType() == DNS.TYPE_CNAME){
+								DNSQuestion newQuestion = new DNSQuestion();
+								DNSRdataName dnsRdataname = (DNSRdataName) ans.getData();
+								newQuestion.setName(dnsRdataname.getName());
+								newQuestion.setType(DNS.TYPE_A);
+								dnsPacket.setQuestions(Collections.singletonList(newQuestion));
+								cNamed = true;
+							}
+						}
 					} else {
 						toSendToClient.setAnswers(rootAnswers);
 						sendDNSReply(toSendToClient, dnsReceived);
@@ -160,15 +186,18 @@ public class SimpleDNS
 					}
 				}
 			}
-			prepareNewQuery(dnsPacket);
+			prepareNewQuery(dnsPacket, question, cNamed);
 		}
 		socket.close();
 	}
 
-	private static void prepareNewQuery(DNS dnsPacket){
+	private static void prepareNewQuery(DNS dnsPacket, DNSQuestion question, boolean cNamed){
 		dnsPacket.setQuery(true);
 		dnsPacket.setRecursionAvailable(true);
 		dnsPacket.setRecursionDesired(true);
+		if (!cNamed) {
+			dnsPacket.setQuestions(Collections.singletonList(question));
+		}
 		// remove already sent additionals and authorities
 		for (int i = 0; i < dnsPacket.getAdditional().size(); i++){
 			dnsPacket.removeAdditional(dnsPacket.getAdditional().get(i));
