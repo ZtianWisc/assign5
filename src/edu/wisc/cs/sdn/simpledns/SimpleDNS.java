@@ -53,7 +53,7 @@ public class SimpleDNS
 			while(true){
 				DatagramPacket dnsReceived = new DatagramPacket(buffer, buffer.length);
 				serverSocket.receive(dnsReceived);
-				System.out.println("Received client DNS query");
+				System.out.println("--------------Handling DNS query-----------------");
 				dnsPacket = DNS.deserialize(buffer, buffer.length);
 				if (dnsPacket.getOpcode() != DNS.OPCODE_STANDARD_QUERY){
 					// Only listening to standard queries
@@ -65,7 +65,6 @@ public class SimpleDNS
 				if (!validDnsTypes.contains(question.getType())){
 					continue;
 				}
-				System.out.println("--------------Handling DNS query-----------------");
 				handleDnsQuery(dnsPacket, dnsReceived);
 			}
 		} catch (SocketException e) {
@@ -105,7 +104,8 @@ public class SimpleDNS
 				System.out.println("-----------------Query failed--------------------");
 				break;
 			}
-			System.out.println("Received answer from server " + serverAddress.toString());
+			System.out.println("Received back from server: " + serverAddress.toString());
+			// dnsPacket is updated every loop
 			dnsPacket = DNS.deserialize(buffer, buffer.length);
 			List<DNSResourceRecord> rootAnswers = dnsPacket.getAnswers();
 			List<DNSResourceRecord> rootAuthorities = dnsPacket.getAuthorities();
@@ -115,15 +115,15 @@ public class SimpleDNS
 				sendDNSReply(dnsPacket, dnsReceived);
 				done = true;
 			} else {
-				//TODO: This part has problem. When querying www.code.org. It seems like the program keep queries for org.
 				if (rootAnswers.isEmpty()) {
 					// if original query was NS, then done.
 					if (question.getType() == DNS.TYPE_NS) {
 						toSendToClient.setAnswers(dnsPacket.getAdditional());
 						sendDNSReply(dnsPacket, dnsReceived);
 					}
+					// look for ip of authority in additional section
 					for (DNSResourceRecord auth : rootAuthorities) {
-						boolean found = false;
+						boolean serverUpdated = false;
 						if (auth.getType() != DNS.TYPE_NS) {
 							continue;
 						}
@@ -133,11 +133,13 @@ public class SimpleDNS
 								DNSRdataAddress addressData = (DNSRdataAddress) additional.getData();
 								String addressName = addressData.toString();
 								serverAddress = InetAddress.getByName(addressName);
-								System.out.println("Query to another NS " + serverAddress.toString());
-								found = true;
+								System.out.println("#####updated Server to query " + serverAddress.toString());
+								//TODO: the problem now is that server to query is not updated when hearing back from root.
+								serverUpdated = true;
+								break;
 							}
 						}
-						if (found) break;
+						if (serverUpdated) break;
 					}
 					// Add additionals, authorities to reply
 					toSendToClient.setAdditional(rootAdditional);
@@ -232,10 +234,10 @@ public class SimpleDNS
 			boolean found = false;
 			for (String entry : ec2Table.keySet()) {
 				long ip = parseIp(ipStr);
-				long subnet = parseIp(entry.substring(0, entry.indexOf("/")));
+				long serverIP = parseIp(entry.substring(0, entry.indexOf("/")));
 				int subnetLength = Integer.parseInt(entry.substring(entry.indexOf("/") + 1));
 				long subnetBits = 0xffffffff - ((1 << (32 - subnetLength)) - 1);
-				if ((subnetBits & ip) == (subnetBits & subnet)) {
+				if ((subnetBits & ip) == (subnetBits & serverIP)) {
 					found = true;
 					String location = ec2Table.get(entry);
 					DNSRdataString txt = new DNSRdataString(location + "-" + ip);
