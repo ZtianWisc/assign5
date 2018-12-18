@@ -96,7 +96,7 @@ public class SimpleDNS
 			query = new DatagramPacket(dnsPacket.serialize(), 0, dnsPacket.getLength(), serverAddress, QUERY_DNS_PORT);
 			// This socket is used to send query to server
 			socket.send(query);
-			System.out.println("Sent query to server " + serverAddress.toString());
+			System.out.println("Sent query to server " + serverAddress.toString() + ". asking for " + question.toString());
 			socket.setSoTimeout(1000);
 			try {
 				socket.receive(new DatagramPacket(buffer, buffer.length));
