@@ -18,7 +18,7 @@ public class SimpleDNS
 	private final static int CLIENT_DNS_PORT = 8053;
 	private final static int QUERY_DNS_PORT = 53;
 	private final static int MAX_PACKET_SIZE = 1024;
-	private final static int MAX_TIME_OUT = 500;
+	private final static int MAX_TIME_OUT = 2000;
 
 	public static void main(String[] args) {
 		System.out.println("Hello, DNS!");
@@ -82,22 +82,24 @@ public class SimpleDNS
 	}
 
 	private static void handleDnsQuery(DNS dnsPacket, DatagramPacket dnsReceived) throws IOException {
-
 		// Check NS then reply to client, if in EC2, add a TXT record to reply
 		byte[] buffer = new byte[MAX_PACKET_SIZE];
 		DatagramPacket query;
-		DNSQuestion question = dnsPacket.getQuestions().get(0);
+		List<DNSQuestion> questions = dnsPacket.getQuestions();
 		InetAddress serverAddress = InetAddress.getByName(serverName);
 		DatagramSocket socket = new DatagramSocket(QUERY_DNS_PORT);
 		DNS toSendToClient = dnsPacket;
 		boolean done = false;
 
 		while(!done) {
-			boolean cNamed = false;
-			query = new DatagramPacket(dnsPacket.serialize(), 0, dnsPacket.getLength(), serverAddress, QUERY_DNS_PORT);
+			System.out.println("Sending query for: " + dnsPacket.getId());
+			for (DNSQuestion q : dnsPacket.getQuestions()) {
+				System.out.println(q.toString());
+			}
+			query = new DatagramPacket(dnsPacket.serialize(), dnsPacket.getLength(), serverAddress, QUERY_DNS_PORT);
 			// This socket is used to send query to server
 			socket.send(query);
-			System.out.println("Sent query to server " + serverAddress.toString() + ". asking for " + question.toString());
+			System.out.println("Sent query to server " + serverAddress.toString() + ". asking for " + dnsPacket.getQuestions().get(0).toString());
 			socket.setSoTimeout(MAX_TIME_OUT);
 			try {
 				socket.receive(new DatagramPacket(buffer, buffer.length));
@@ -112,14 +114,6 @@ public class SimpleDNS
 			List<DNSResourceRecord> rootAnswers = dnsPacket.getAnswers();
 			List<DNSResourceRecord> rootAuthorities = dnsPacket.getAuthorities();
 			List<DNSResourceRecord> rootAdditional = dnsPacket.getAdditional();
-			/*
-			 for (DNSResourceRecord auth : rootAuthorities){
-				System.out.println(auth.toString());
-			}
-			for (DNSResourceRecord addl : rootAdditional){
-				System.out.println(addl.toString());
-			}
-			*/
 			if(!dnsPacket.isRecursionDesired()){
 				// Send back to client
 				sendDNSReply(dnsPacket, dnsReceived);
@@ -127,7 +121,7 @@ public class SimpleDNS
 			} else {
 				if (rootAnswers.isEmpty()) {
 					// if original query was NS, then done.
-					if (question.getType() == DNS.TYPE_NS) {
+					if (questions.get(0).getType() == DNS.TYPE_NS) {
 						toSendToClient.setAnswers(dnsPacket.getAdditional());
 						sendDNSReply(dnsPacket, dnsReceived);
 						done = true;
@@ -135,20 +129,23 @@ public class SimpleDNS
 					// look for ip of authority in additional section
 					for (DNSResourceRecord auth : rootAuthorities) {
 						boolean serverUpdated = false;
-						System.out.println("-----Trying to find ip for " + auth.toString());
+						System.out.println("This auth is " + auth.toString());
+						System.out.println("All additionls are: ");
+						for (DNSResourceRecord additional : rootAdditional) {
+							System.out.println(additional.toString());
+						}
 						if (auth.getType() != DNS.TYPE_NS) {
 							continue;
 						}
 						DNSRdataName nsName = (DNSRdataName) auth.getData();
 						for (DNSResourceRecord additional : rootAdditional) {
-							System.out.println("This addtional is " + additional.toString());
 							if (additional.getType() == DNS.TYPE_A
 									&& nsName.getName().equals(additional.getName()))
 							{
-								DNSRdataAddress addressData = (DNSRdataAddress) additional.getData();
-								String addressName = addressData.toString();
+								System.out.println("This addtional matches: " + additional.toString());
+								String addressName = additional.getName();
 								serverAddress = InetAddress.getByName(addressName);
-								System.out.println("updated Server to query " + serverAddress.toString());
+								System.out.println("Updated Server to query " + serverAddress.toString());
 								serverUpdated = true;
 								break;
 							}
@@ -172,11 +169,10 @@ public class SimpleDNS
 						for (DNSResourceRecord ans : rootAnswers){
 							if (ans.getType() == DNS.TYPE_CNAME){
 								DNSQuestion newQuestion = new DNSQuestion();
-								DNSRdataName dnsRdataname = (DNSRdataName) ans.getData();
-								newQuestion.setName(dnsRdataname.getName());
+								newQuestion.setName(ans.getData().toString());
 								newQuestion.setType(DNS.TYPE_A);
+								newQuestion.setClass(DNS.CLASS_IN);
 								dnsPacket.setQuestions(Collections.singletonList(newQuestion));
-								cNamed = true;
 							}
 						}
 					} else {
@@ -186,25 +182,21 @@ public class SimpleDNS
 					}
 				}
 			}
-			prepareNewQuery(dnsPacket, question, cNamed);
+			prepareNewQuery(dnsPacket, questions);
 		}
 		socket.close();
 	}
 
-	private static void prepareNewQuery(DNS dnsPacket, DNSQuestion question, boolean cNamed){
+	private static void prepareNewQuery(DNS dnsPacket, List<DNSQuestion> questions){
 		dnsPacket.setQuery(true);
+		dnsPacket.setOpcode(DNS.OPCODE_STANDARD_QUERY);
+		dnsPacket.setTruncated(false);
 		dnsPacket.setRecursionAvailable(true);
-		dnsPacket.setRecursionDesired(true);
-		if (!cNamed) {
-			dnsPacket.setQuestions(Collections.singletonList(question));
-		}
-		// remove already sent additionals and authorities
-		for (int i = 0; i < dnsPacket.getAdditional().size(); i++){
-			dnsPacket.removeAdditional(dnsPacket.getAdditional().get(i));
-		}
-		for (int i = 0; i < dnsPacket.getAuthorities().size(); i++){
-			dnsPacket.removeAuthority(dnsPacket.getAuthorities().get(i));
-		}
+		dnsPacket.setRecursionDesired(false);
+		dnsPacket.setAuthenicated(false);
+		dnsPacket.setQuestions(questions);
+		dnsPacket.setAuthorities(new LinkedList<>());
+		dnsPacket.setAdditional(new LinkedList<>());
 	}
 
 	private static void sendDNSReply(DNS dnsPacket, DatagramPacket dnsReceived) throws IOException{
@@ -246,7 +238,6 @@ public class SimpleDNS
 				}
 			}
 		}
-		System.out.println("Loaded static EC2 table from " + file);
 		return ec2Map;
 	}
 
