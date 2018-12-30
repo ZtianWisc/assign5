@@ -17,7 +17,7 @@ public class SimpleDNS
 	private static DatagramSocket serverSocket;
 	private final static int CLIENT_DNS_PORT = 8053;
 	private final static int QUERY_DNS_PORT = 53;
-	private final static int MAX_PACKET_SIZE = 1024;
+	private final static int MAX_PACKET_SIZE = 4096;
 	private final static int MAX_TIME_OUT = 2000;
 
 	public static void main(String[] args) {
@@ -87,7 +87,7 @@ public class SimpleDNS
 		DatagramPacket query;
 		List<DNSQuestion> questions = dnsPacket.getQuestions();
 		InetAddress serverAddress = InetAddress.getByName(serverName);
-		DatagramSocket socket = new DatagramSocket(QUERY_DNS_PORT);
+		DatagramSocket socket = new DatagramSocket();
 		DNS toSendToClient = dnsPacket;
 		boolean done = false;
 
@@ -193,7 +193,8 @@ public class SimpleDNS
 		dnsPacket.setTruncated(false);
 		dnsPacket.setRecursionAvailable(true);
 		dnsPacket.setRecursionDesired(false);
-		dnsPacket.setAuthenicated(false);
+		dnsPacket.setAuthenicated(true);
+		dnsPacket.setAuthoritative(true);
 		dnsPacket.setQuestions(questions);
 		dnsPacket.setAuthorities(new LinkedList<>());
 		dnsPacket.setAdditional(new LinkedList<>());
